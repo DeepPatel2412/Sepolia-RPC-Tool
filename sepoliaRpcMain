@@ -1,1 +1,226 @@
+#!/bin/bash
+set -e
 
+# ========== RAW LINKS ==========
+GITHUB_RAW="https://raw.githubusercontent.com/DeepPatel2412/Sepolia-RPC-Tool/main"
+INSTALL_PREREQ="$GITHUB_RAW/installPrerequisites.sh"
+BANNER="$GITHUB_RAW/banner.txt"
+GETH_YML="$GITHUB_RAW/executionGeth.yml"
+ERIGON_YML="$GITHUB_RAW/executionErigon.yml"
+NETHERMIND_YML="$GITHUB_RAW/executionNethermind.yml"
+RETH_YML="$GITHUB_RAW/executionReth.yml"
+LIGHTHOUSE_YML="$GITHUB_RAW/consensusLighthouse.yml"
+PRYSM_YML="$GITHUB_RAW/consensusPrysm.yml"
+HAPROXY_LOW="$GITHUB_RAW/haproxyLow.cfg"
+HAPROXY_MID="$GITHUB_RAW/haproxyMid.cfg"
+HAPROXY_HIGH="$GITHUB_RAW/haproxyHigh.cfg"
+
+# ========== Helper Functions ==========
+box() {
+  local content=("$@")
+  local width=0
+  for line in "${content[@]}"; do (( ${#line} > width )) && width=${#line}; done
+  width=$((width + 4))
+  echo "┌$(printf '─%.0s' $(seq 1 $((width-2))))┐"
+  for line in "${content[@]}"; do printf "│ %-*s │\n" $((width-4)) "$line"; done
+  echo "└$(printf '─%.0s' $(seq 1 $((width-2))))┘"
+}
+
+# ========== 1. Banner ==========
+curl -fsSL "$BANNER" || echo "Sepolia RPC Tool"
+
+# ========== 2. Prerequisite Check & Install ==========
+if ! command -v docker &>/dev/null || ! docker version &>/dev/null; then
+  box "Docker not found or not running!" "Running installPrerequisites.sh from repo..."
+  curl -fsSL "$INSTALL_PREREQ" | bash
+fi
+
+if docker compose version &>/dev/null 2>&1; then
+  COMPOSE_CMD="docker compose"
+elif command -v docker-compose &>/dev/null; then
+  COMPOSE_CMD="docker-compose"
+else
+  box "Docker Compose is not available!" "Running installPrerequisites.sh from repo..."
+  curl -fsSL "$INSTALL_PREREQ" | bash
+  if docker compose version &>/dev/null 2>&1; then
+    COMPOSE_CMD="docker compose"
+  elif command -v docker-compose &>/dev/null; then
+    COMPOSE_CMD="docker-compose"
+  else
+    box "Docker Compose installation failed. Exiting."
+    exit 1
+  fi
+fi
+
+if ! command -v curl &>/dev/null; then
+  box "curl is not installed!" "Running installPrerequisites.sh from repo..."
+  curl -fsSL "$INSTALL_PREREQ" | bash
+fi
+
+if ! command -v sudo &>/dev/null; then
+  box "sudo is not installed!" "Running installPrerequisites.sh from repo..."
+  curl -fsSL "$INSTALL_PREREQ" | bash
+fi
+
+box "Prerequisites check passed!" "Docker: ✓" "Compose: ✓" "curl: ✓" "sudo: ✓"
+
+# ========== 3. User Selections ==========
+box "Select Execution Client:" "1. Geth" "2. Erigon" "3. Nethermind" "4. Reth"
+read -rp "Enter number: " EXEC_CHOICE
+
+case $EXEC_CHOICE in
+  1) EXEC_NAME="geth"; EXEC_YML="$GETH_YML" ;;
+  2) EXEC_NAME="erigon"; EXEC_YML="$ERIGON_YML" ;;
+  3) EXEC_NAME="nethermind"; EXEC_YML="$NETHERMIND_YML" ;;
+  4) EXEC_NAME="reth"; EXEC_YML="$RETH_YML" ;;
+  *) box "Invalid choice. Exiting."; exit 1 ;;
+esac
+
+box "Select Consensus Client:" "1. Lighthouse" "2. Prysm"
+read -rp "Enter number: " CONS_CHOICE
+
+case $CONS_CHOICE in
+  1) CONS_NAME="lighthouse"; CONS_YML="$LIGHTHOUSE_YML"; CONS_PORT=5052 ;;
+  2) CONS_NAME="prysm"; CONS_YML="$PRYSM_YML"; CONS_PORT=3500 ;;
+  *) box "Invalid choice. Exiting."; exit 1 ;;
+esac
+
+box "Select HAProxy Profile:" "1. Low (4c/8GB)" "2. Mid (6c/16GB)" "3. High (8c+/32GB+)"
+read -rp "Enter number: " HW_CHOICE
+
+case $HW_CHOICE in
+  1) HAPROXY_CFG="$HAPROXY_LOW"; HAPROXY_PROFILE="Low" ;;
+  2) HAPROXY_CFG="$HAPROXY_MID"; HAPROXY_PROFILE="Mid" ;;
+  3) HAPROXY_CFG="$HAPROXY_HIGH"; HAPROXY_PROFILE="High" ;;
+  *) box "Invalid choice. Exiting."; exit 1 ;;
+esac
+
+box "Your Configuration:" \
+    "Execution: $EXEC_NAME" \
+    "Consensus: $CONS_NAME" \
+    "HAProxy: $HAPROXY_PROFILE" \
+    "Ready to install?"
+
+read -rp "Proceed? (y/n): " CONFIRM
+if [[ ! $CONFIRM =~ ^[Yy]$ ]]; then
+  box "Installation cancelled."
+  exit 0
+fi
+
+# ========== 4. Directory Structure ==========
+box "Creating directory structure..."
+mkdir -p Ethereum/Execution Ethereum/Consensus
+cd Ethereum
+
+# ========== 5. Generate JWT ==========
+if [ ! -f jwt.hex ]; then
+  box "Generating JWT secret..."
+  openssl rand -hex 32 > jwt.hex
+fi
+
+# ========== 6. Create whitelist.lst if missing ==========
+if [ ! -f whitelist.lst ]; then
+  echo "127.0.0.1/32" > whitelist.lst
+fi
+
+# ========== 7. Download Configs ==========
+box "Downloading configurations..."
+curl -fsSL "$EXEC_YML" -o execution.yml
+curl -fsSL "$CONS_YML" -o consensus.yml
+curl -fsSL "$HAPROXY_CFG" -o haproxy.cfg
+
+# Patch HAProxy for Prysm port
+if [ "$CONS_NAME" = "prysm" ]; then
+  sed -i "s/consensus:5052/consensus:3500/g" haproxy.cfg
+fi
+
+# ========== 8. Generate Combined docker-compose.yml ==========
+box "Generating docker-compose.yml..."
+cat <<EOF > docker-compose.yml
+version: "3.8"
+services:
+EOF
+
+sed '/^services:/d; /^version:/d' execution.yml >> docker-compose.yml
+sed '/^services:/d; /^version:/d' consensus.yml >> docker-compose.yml
+
+cat <<EOF >> docker-compose.yml
+
+  haproxy:
+    image: haproxy:latest
+    container_name: haproxy
+    restart: unless-stopped
+    depends_on:
+      - $EXEC_NAME
+      - $CONS_NAME
+    volumes:
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg
+      - ./whitelist.lst:/etc/haproxy/whitelist.lst
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - sepolia-net
+
+networks:
+  sepolia-net:
+    name: sepolia-rpc-net
+EOF
+
+# ========== 9. Configure Firewall ==========
+box "Configuring firewall rules..."
+
+FIREWALL_PORTS=(
+  "80/tcp"
+  "443/tcp"
+  "30303/tcp"
+  "30303/udp"
+)
+if [ "$CONS_NAME" = "lighthouse" ]; then
+  FIREWALL_PORTS+=("9000/tcp" "9000/udp")
+elif [ "$CONS_NAME" = "prysm" ]; then
+  FIREWALL_PORTS+=("13000/tcp" "12000/udp")
+fi
+
+open_ufw_ports() {
+  sudo ufw allow OpenSSH || true
+  for port in "${FIREWALL_PORTS[@]}"; do
+    sudo ufw allow "$port"
+  done
+  sudo ufw --force enable
+}
+
+open_firewalld_ports() {
+  for port in "${FIREWALL_PORTS[@]}"; do
+    proto="${port##*/}"
+    portnum="${port%%/*}"
+    sudo firewall-cmd --permanent --add-port="${portnum}/${proto}"
+  done
+  sudo firewall-cmd --reload
+}
+
+if command -v ufw &>/dev/null; then
+  box "Applying firewall rules using ufw..."
+  open_ufw_ports
+elif command -v firewall-cmd &>/dev/null; then
+  box "Applying firewall rules using firewalld..."
+  open_firewalld_ports
+else
+  box "No supported firewall detected (ufw or firewalld)." \
+      "Please open the following ports manually:" "${FIREWALL_PORTS[*]}"
+fi
+
+# ========== 10. Start Everything ==========
+box "Starting Sepolia RPC stack..."
+$COMPOSE_CMD up -d
+
+# ========== 11. Final Summary ==========
+box "🚀 Sepolia RPC Stack Running!" \
+    "Execution: $EXEC_NAME" \
+    "Consensus: $CONS_NAME" \
+    "HAProxy: $HAPROXY_PROFILE profile" \
+    "HTTP: http://localhost" \
+    "HTTPS: https://localhost" \
+    "Logs: $COMPOSE_CMD logs"
+
+exit 0
