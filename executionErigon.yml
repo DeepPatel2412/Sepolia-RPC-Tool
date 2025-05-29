@@ -1,1 +1,34 @@
-
+erigon:
+  image: thorax/erigon:latest
+  container_name: erigon
+  restart: unless-stopped
+  user: "0:0"
+  volumes:
+    - ./Execution:/data
+    - ./jwt.hex:/data/jwt.hex
+  command:
+    - --chain=sepolia
+    - --datadir=/data
+    - --prune=hrtc
+    - --prune.h.older=3
+    - --prune.r.older=3
+    - --prune.t.older=3
+    - --externalcl
+    - --authrpc.jwtsecret=/data/jwt.hex
+    - --authrpc.addr=0.0.0.0
+    - --authrpc.port=8551
+    - --http
+    - --http.addr=0.0.0.0
+    - --http.port=8545
+    - --http.vhosts=*
+    - --http.api=eth,net,web3,erigon,debug,trace,txpool
+    - --ws
+    - --ws.addr=0.0.0.0
+    - --ws.port=8546
+    - --port=30303
+  ports:
+    - 8545:8545
+    - 8546:8546
+    - 8551:8551
+    - 30303:30303/tcp
+    - 30303:30303/udp
