@@ -1,1 +1,32 @@
-
+reth:
+  image: ghcr.io/paradigmxyz/reth:latest
+  container_name: reth
+  restart: unless-stopped
+  user: "0:0"
+  volumes:
+    - ./Execution:/root/.local/share/reth
+    - ./jwt.hex:/jwt.hex
+  command:
+    - node
+    - --chain=sepolia
+    - --datadir=/root/.local/share/reth
+    - --http
+    - --http.addr=0.0.0.0
+    - --http.port=8545
+    - --http.api=eth,net,web3
+    - --ws
+    - --ws.addr=0.0.0.0
+    - --ws.port=8546
+    - --authrpc.addr=0.0.0.0
+    - --authrpc.port=8551
+    - --authrpc.jwtsecret=/jwt.hex
+    - --port=30303
+    - --prune=default
+    - --blob
+    - --blob.sidecar
+  ports:
+    - 8545:8545
+    - 8546:8546
+    - 8551:8551
+    - 30303:30303/tcp
+    - 30303:30303/udp
