@@ -1,1 +1,25 @@
-
+prysm:
+  image: gcr.io/prysmaticlabs/prysm/beacon-chain:stable
+  container_name: prysm
+  restart: unless-stopped
+  user: "0:0"
+  volumes:
+    - ./Consensus:/data
+    - ./jwt.hex:/jwt.hex
+  command:
+    - --sepolia
+    - --datadir=/data
+    - --checkpoint-sync-url=https://sepolia.beaconstate.info
+    - --grpc-gateway-host=0.0.0.0
+    - --grpc-gateway-port=3500
+    - --p2p-tcp-port=13000
+    - --p2p-udp-port=12000
+    - --execution-endpoint=http://execution:8551
+    - --jwt-secret=/jwt.hex
+    - --prune-finalized
+    - --prune-cold
+    - --enable-blobs-sidecar
+  ports:
+    - 3500:3500
+    - 13000:13000/tcp
+    - 12000:12000/udp
