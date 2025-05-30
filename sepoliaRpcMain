@@ -146,14 +146,28 @@ fi
 
 box "Generating docker-compose.yml..."
 
+# Create a clean docker-compose.yml with only the services section
 cat > docker-compose.yml <<EOF
 services:
 EOF
 
-# Remove 'services:', 'version:', 'networks:', and 'network_mode:' lines from the individual files
-sed '/^services:/d; /^version:/d; /^networks:/d; /^\s*networks:\s*$/d; /^\s*network_mode:/d' execution.yml >> docker-compose.yml
-sed '/^services:/d; /^version:/d; /^networks:/d; /^\s*networks:\s*$/d; /^\s*network_mode:/d' consensus.yml >> docker-compose.yml
+# Process execution.yml - rename service to match selected client
+# This ensures the service name is always the one we expect (e.g., "erigon")
+box "Processing execution client config..."
+sed -n '/^[a-zA-Z0-9_-]\+:/,/^[a-zA-Z0-9_-]\+:/p' execution.yml | 
+  sed '1s/^[a-zA-Z0-9_-]\+:/'$EXEC_NAME':/' | 
+  sed '$d' | 
+  sed '/^services:/d; /^version:/d; /^networks:/d; /^\s*networks:/d; /^\s*network_mode:/d' >> docker-compose.yml
 
+# Process consensus.yml - rename service to match selected client
+# This ensures the service name is always the one we expect (e.g., "lighthouse")
+box "Processing consensus client config..."
+sed -n '/^[a-zA-Z0-9_-]\+:/,/^[a-zA-Z0-9_-]\+:/p' consensus.yml | 
+  sed '1s/^[a-zA-Z0-9_-]\+:/'$CONS_NAME':/' | 
+  sed '$d' | 
+  sed '/^services:/d; /^version:/d; /^networks:/d; /^\s*networks:/d; /^\s*network_mode:/d' >> docker-compose.yml
+
+# Add HAProxy service
 cat >> docker-compose.yml <<EOF
 
   haproxy:
@@ -170,6 +184,16 @@ cat >> docker-compose.yml <<EOF
       - "80:80"
       - "443:443"
 EOF
+
+# Validate the generated docker-compose.yml
+box "Validating docker-compose.yml..."
+if $COMPOSE_CMD config > /dev/null 2>&1; then
+  box "✅ docker-compose.yml is valid!"
+else
+  box "❌ docker-compose.yml validation failed!"
+  $COMPOSE_CMD config
+  exit 1
+fi
 
 # ========== 9. Configure Firewall ==========
 
