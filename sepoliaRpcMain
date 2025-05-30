@@ -1,8 +1,11 @@
 #!/bin/bash
+
 set -e
 
 # ========== RAW LINKS ==========
+
 GITHUB_RAW="https://raw.githubusercontent.com/DeepPatel2412/Sepolia-RPC-Tool/main"
+
 INSTALL_PREREQ="$GITHUB_RAW/installPrerequisites.sh"
 BANNER="$GITHUB_RAW/banner.txt"
 GETH_YML="$GITHUB_RAW/executionGeth.yml"
@@ -16,6 +19,7 @@ HAPROXY_MID="$GITHUB_RAW/haproxyMid.cfg"
 HAPROXY_HIGH="$GITHUB_RAW/haproxyHigh.cfg"
 
 # ========== Helper Functions ==========
+
 box() {
   local content=("$@")
   local width=0
@@ -27,9 +31,11 @@ box() {
 }
 
 # ========== 1. Banner ==========
+
 curl -fsSL "$BANNER" || echo "Sepolia RPC Tool"
 
 # ========== 2. Prerequisite Check & Install ==========
+
 if ! command -v docker &>/dev/null || ! docker version &>/dev/null; then
   box "Docker not found or not running!" "Running installPrerequisites.sh from repo..."
   curl -fsSL "$INSTALL_PREREQ" | bash
@@ -65,9 +71,9 @@ fi
 box "Prerequisites check passed!" "Docker: ✓" "Compose: ✓" "curl: ✓" "sudo: ✓"
 
 # ========== 3. User Selections ==========
+
 box "Select Execution Client:" "1. Geth" "2. Erigon" "3. Nethermind" "4. Reth"
 read -rp "Enter number: " EXEC_CHOICE
-
 case $EXEC_CHOICE in
   1) EXEC_NAME="geth"; EXEC_YML="$GETH_YML" ;;
   2) EXEC_NAME="erigon"; EXEC_YML="$ERIGON_YML" ;;
@@ -78,7 +84,6 @@ esac
 
 box "Select Consensus Client:" "1. Lighthouse" "2. Prysm"
 read -rp "Enter number: " CONS_CHOICE
-
 case $CONS_CHOICE in
   1) CONS_NAME="lighthouse"; CONS_YML="$LIGHTHOUSE_YML"; CONS_PORT=5052 ;;
   2) CONS_NAME="prysm"; CONS_YML="$PRYSM_YML"; CONS_PORT=3500 ;;
@@ -87,7 +92,6 @@ esac
 
 box "Select HAProxy Profile:" "1. Low (4c/8GB)" "2. Mid (6c/16GB)" "3. High (8c+/32GB+)"
 read -rp "Enter number: " HW_CHOICE
-
 case $HW_CHOICE in
   1) HAPROXY_CFG="$HAPROXY_LOW"; HAPROXY_PROFILE="Low" ;;
   2) HAPROXY_CFG="$HAPROXY_MID"; HAPROXY_PROFILE="Mid" ;;
@@ -96,10 +100,10 @@ case $HW_CHOICE in
 esac
 
 box "Your Configuration:" \
-    "Execution: $EXEC_NAME" \
-    "Consensus: $CONS_NAME" \
-    "HAProxy: $HAPROXY_PROFILE" \
-    "Ready to install?"
+"Execution: $EXEC_NAME" \
+"Consensus: $CONS_NAME" \
+"HAProxy: $HAPROXY_PROFILE" \
+"Ready to install?"
 
 read -rp "Proceed? (y/n): " CONFIRM
 if [[ ! $CONFIRM =~ ^[Yy]$ ]]; then
@@ -108,22 +112,26 @@ if [[ ! $CONFIRM =~ ^[Yy]$ ]]; then
 fi
 
 # ========== 4. Directory Structure ==========
+
 box "Creating directory structure..."
 mkdir -p Ethereum/Execution Ethereum/Consensus
 cd Ethereum
 
 # ========== 5. Generate JWT ==========
+
 if [ ! -f jwt.hex ]; then
   box "Generating JWT secret..."
   openssl rand -hex 32 > jwt.hex
 fi
 
 # ========== 6. Create whitelist.lst if missing ==========
+
 if [ ! -f whitelist.lst ]; then
   echo "127.0.0.1/32" > whitelist.lst
 fi
 
 # ========== 7. Download Configs ==========
+
 box "Downloading configurations..."
 curl -fsSL "$EXEC_YML" -o execution.yml
 curl -fsSL "$CONS_YML" -o consensus.yml
@@ -135,16 +143,17 @@ if [ "$CONS_NAME" = "prysm" ]; then
 fi
 
 # ========== 8. Generate Combined docker-compose.yml ==========
+
 box "Generating docker-compose.yml..."
-cat <<EOF > docker-compose.yml
-version: "3.8"
+
+cat > docker-compose.yml <<EOF
 services:
 EOF
 
 sed '/^services:/d; /^version:/d' execution.yml >> docker-compose.yml
 sed '/^services:/d; /^version:/d' consensus.yml >> docker-compose.yml
 
-cat <<EOF >> docker-compose.yml
+cat >> docker-compose.yml <<EOF
 
   haproxy:
     image: haproxy:latest
@@ -168,6 +177,7 @@ networks:
 EOF
 
 # ========== 9. Configure Firewall ==========
+
 box "Configuring firewall rules..."
 
 FIREWALL_PORTS=(
@@ -176,6 +186,7 @@ FIREWALL_PORTS=(
   "30303/tcp"
   "30303/udp"
 )
+
 if [ "$CONS_NAME" = "lighthouse" ]; then
   FIREWALL_PORTS+=("9000/tcp" "9000/udp")
 elif [ "$CONS_NAME" = "prysm" ]; then
@@ -207,20 +218,22 @@ elif command -v firewall-cmd &>/dev/null; then
   open_firewalld_ports
 else
   box "No supported firewall detected (ufw or firewalld)." \
-      "Please open the following ports manually:" "${FIREWALL_PORTS[*]}"
+  "Please open the following ports manually:" "${FIREWALL_PORTS[*]}"
 fi
 
 # ========== 10. Start Everything ==========
+
 box "Starting Sepolia RPC stack..."
 $COMPOSE_CMD up -d
 
 # ========== 11. Final Summary ==========
+
 box "🚀 Sepolia RPC Stack Running!" \
-    "Execution: $EXEC_NAME" \
-    "Consensus: $CONS_NAME" \
-    "HAProxy: $HAPROXY_PROFILE profile" \
-    "HTTP: http://localhost" \
-    "HTTPS: https://localhost" \
-    "Logs: $COMPOSE_CMD logs"
+"Execution: $EXEC_NAME" \
+"Consensus: $CONS_NAME" \
+"HAProxy: $HAPROXY_PROFILE profile" \
+"HTTP: http://localhost" \
+"HTTPS: https://localhost" \
+"Logs: $COMPOSE_CMD logs"
 
 exit 0
