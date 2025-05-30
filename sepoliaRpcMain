@@ -146,28 +146,23 @@ fi
 
 box "Generating docker-compose.yml..."
 
-# Create a clean docker-compose.yml with only the services section
 cat > docker-compose.yml <<EOF
 services:
 EOF
 
-# Process execution.yml - rename service to match selected client
-# This ensures the service name is always the one we expect (e.g., "erigon")
-box "Processing execution client config..."
-sed -n '/^[a-zA-Z0-9_-]\+:/,/^[a-zA-Z0-9_-]\+:/p' execution.yml | 
-  sed '1s/^[a-zA-Z0-9_-]\+:/'$EXEC_NAME':/' | 
-  sed '$d' | 
-  sed '/^services:/d; /^version:/d; /^networks:/d; /^\s*networks:/d; /^\s*network_mode:/d' >> docker-compose.yml
+# Function to extract the first service block from a YAML file
+extract_service_block() {
+  awk '
+    /^services:/ {flag=1; next}
+    /^version:/ {next}
+    /^[a-zA-Z0-9_-]+:/ && flag {if (count++ > 0) exit; print; next}
+    flag {print}
+  ' "$1"
+}
 
-# Process consensus.yml - rename service to match selected client
-# This ensures the service name is always the one we expect (e.g., "lighthouse")
-box "Processing consensus client config..."
-sed -n '/^[a-zA-Z0-9_-]\+:/,/^[a-zA-Z0-9_-]\+:/p' consensus.yml | 
-  sed '1s/^[a-zA-Z0-9_-]\+:/'$CONS_NAME':/' | 
-  sed '$d' | 
-  sed '/^services:/d; /^version:/d; /^networks:/d; /^\s*networks:/d; /^\s*network_mode:/d' >> docker-compose.yml
+extract_service_block execution.yml >> docker-compose.yml
+extract_service_block consensus.yml >> docker-compose.yml
 
-# Add HAProxy service
 cat >> docker-compose.yml <<EOF
 
   haproxy:
