@@ -150,8 +150,9 @@ cat > docker-compose.yml <<EOF
 services:
 EOF
 
-sed '/^services:/d; /^version:/d' execution.yml >> docker-compose.yml
-sed '/^services:/d; /^version:/d' consensus.yml >> docker-compose.yml
+# Remove 'services:', 'version:', 'networks:', and 'network_mode:' lines from the individual files
+sed '/^services:/d; /^version:/d; /^networks:/d; /^\s*networks:\s*$/d; /^\s*network_mode:/d' execution.yml >> docker-compose.yml
+sed '/^services:/d; /^version:/d; /^networks:/d; /^\s*networks:\s*$/d; /^\s*network_mode:/d' consensus.yml >> docker-compose.yml
 
 cat >> docker-compose.yml <<EOF
 
@@ -168,12 +169,6 @@ cat >> docker-compose.yml <<EOF
     ports:
       - "80:80"
       - "443:443"
-    networks:
-      - sepolia-net
-
-networks:
-  sepolia-net:
-    name: sepolia-rpc-net
 EOF
 
 # ========== 9. Configure Firewall ==========
